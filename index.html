@@ -1,1 +1,563 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>플로팅 홀로그램 웹 시뮬레이션</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700&display=swap');
+        body { font-family: 'Noto Sans KR', sans-serif; }
+        canvas { max-width: 100%; height: auto; }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen flex flex-col items-center p-4 md:p-8">
 
+    <div class="max-w-4xl w-full text-center mb-6">
+        <h1 class="text-3xl font-bold text-cyan-400 mb-2">🪐 우주 행성 플로팅 홀로그램 시뮬레이션</h1>
+        <p class="text-gray-400">웹 브라우저에서 바로 확인하는 Pepper's Ghost 착시 원리 (입사각 = 반사각)</p>
+    </div>
+
+    <!-- 메인 시뮬레이션 컨테이너 -->
+    <div class="relative w-full max-w-4xl mb-6 flex justify-center aspect-video md:aspect-auto">
+        <!-- 2D 캔버스 (항상 배경은 렌더링됨) -->
+        <canvas id="simCanvas" width="800" height="500" class="w-full bg-gray-950 border-2 border-gray-700 rounded-xl shadow-2xl block"></canvas>
+        <!-- 3D WebGL 컨테이너 (3D 모드일 때만 활성화) -->
+        <div id="threeContainer" class="hidden absolute top-0 left-0 w-full h-full rounded-xl overflow-hidden cursor-grab active:cursor-grabbing border-2 border-transparent z-10">
+            <div class="absolute top-4 right-4 bg-black/60 text-white text-xs px-3 py-1 rounded-full border border-gray-500 pointer-events-none">
+                👆 마우스를 드래그하여 3D 화면을 돌려보세요
+            </div>
+        </div>
+    </div>
+
+    <!-- 인터랙티브 컨트롤 패널 -->
+    <div class="flex flex-col md:flex-row flex-wrap gap-4 bg-gray-800 p-6 rounded-xl w-full max-w-4xl shadow-lg border border-gray-700">
+        
+        <!-- 뷰 모드 토글 -->
+        <div class="flex-1 min-w-[140px]">
+            <label class="block text-sm font-bold mb-2 text-purple-400">뷰 모드 변경</label>
+            <div class="flex bg-gray-900 rounded overflow-hidden border border-gray-600">
+                <button id="btn2D" class="flex-1 bg-purple-600 text-white font-bold py-1 px-2 text-sm focus:outline-none transition-colors">2D 단면</button>
+                <button id="btn3D" class="flex-1 text-gray-400 font-bold py-1 px-2 text-sm hover:bg-gray-800 focus:outline-none transition-colors">3D 입체</button>
+            </div>
+            <p class="text-xs text-gray-400 mt-1">2D와 3D를 전환합니다.</p>
+        </div>
+
+        <div class="flex-1 min-w-[140px]">
+            <label class="block text-sm font-bold mb-2 text-pink-400">행성 선택</label>
+            <select id="planetSelect" class="w-full bg-gray-900 border border-gray-600 text-white rounded p-1 cursor-pointer outline-none focus:border-pink-500">
+                <option value="jupiter" selected>목성 (Jupiter)</option>
+                <option value="earth">지구 (Earth)</option>
+                <option value="mars">화성 (Mars)</option>
+                <option value="neptune">해왕성 (Neptune)</option>
+            </select>
+            <p class="text-xs text-gray-400 mt-1">관찰할 행성을 고르세요.</p>
+        </div>
+
+        <div class="flex-1 min-w-[140px]">
+            <label class="block text-sm font-bold mb-2 text-orange-400">스마트폰 위 위치 이동</label>
+            <input type="range" id="objSlider" min="-190" max="-10" value="-100" class="w-full accent-orange-500 cursor-pointer">
+            <p class="text-xs text-gray-400 mt-1">물체를 이동하면 허상도 움직입니다.</p>
+        </div>
+        
+        <div class="flex-1 min-w-[140px]">
+            <label class="block text-sm font-bold mb-2 text-cyan-400">반사판 각도: <span id="angleVal" class="text-white">45</span>°</label>
+            <input type="range" id="angleSlider" min="20" max="70" value="45" class="w-full accent-cyan-500 cursor-pointer">
+            <p class="text-xs text-gray-400 mt-1">45도가 아닐 때의 변화를 관찰하세요.</p>
+        </div>
+
+        <div class="flex-1 min-w-[140px]">
+            <label class="block text-sm font-bold mb-2 text-green-400">관찰자 높이 조절</label>
+            <input type="range" id="eyeSlider" min="-50" max="150" value="50" class="w-full accent-green-500 cursor-pointer">
+            <p class="text-xs text-gray-400 mt-1">눈높이에 따른 시야 각도 변화.</p>
+        </div>
+
+        <div class="flex items-center justify-center bg-gray-700 px-4 rounded-lg min-w-[140px]">
+            <label class="flex items-center space-x-3 cursor-pointer p-2 w-full justify-center">
+                <input type="checkbox" id="rayToggle" checked class="w-5 h-5 accent-yellow-400">
+                <span class="font-bold text-yellow-400 select-none text-sm">빛 경로 켜기</span>
+            </label>
+        </div>
+    </div>
+
+    <!-- 원리 설명 텍스트 -->
+    <div class="max-w-4xl w-full bg-gray-800/50 p-6 rounded-xl mt-6 border border-gray-700 text-sm leading-relaxed">
+        <h3 class="text-lg font-bold text-white mb-2">💡 과학 원리 해설</h3>
+        <ul class="list-disc pl-5 space-y-2 text-gray-300">
+            <li><strong>반사의 법칙:</strong> 스마트폰(실제 물체)에서 출발한 빛은 유리판을 만나 튕겨 나갈 때, 들어온 각도(입사각)와 동일한 각도(반사각)로 반사되어 눈으로 들어옵니다.</li>
+            <li><strong>허상(Virtual Image)의 생성:</strong> 관찰자의 뇌는 빛이 꺾여서 왔다는 사실을 인지하지 못하고, <strong>빛이 직진해서 왔다고 착각</strong>합니다. 따라서 눈으로 들어온 빛의 연장선 끝에 물체가 있다고 인식하게 됩니다.</li>
+            <li><strong>3D 입체 투영:</strong> 3D 모드에서 화면을 돌려보면, 특정 각도에서만 홀로그램이 완벽하게 맺히고 뒷면이나 다른 각도에서는 상이 깨지거나 보이지 않는 실제 장치의 한계를 확인할 수 있습니다.</li>
+        </ul>
+    </div>
+
+    <script>
+        // === 공통 상태 및 2D 캔버스 설정 ===
+        const canvas = document.getElementById('simCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        let is3DMode = false;
+        let objX = -100;
+        let angle = 45;
+        let showRays = true;
+        let eyeY = 50;
+
+        // 행성 데이터
+        const planets = {
+            jupiter: { name: '목성', src: 'https://upload.wikimedia.org/wikipedia/commons/e/e2/Jupiter.jpg', color: '#fbbf24', holoColor: '#fcd34d' },
+            earth: { name: '지구', src: 'https://upload.wikimedia.org/wikipedia/commons/9/97/The_Earth_seen_from_Apollo_17.jpg', color: '#60a5fa', holoColor: '#93c5fd' },
+            mars: { name: '화성', src: 'https://upload.wikimedia.org/wikipedia/commons/0/02/OSIRIS_Mars_true_color.jpg', color: '#ef4444', holoColor: '#fca5a5' },
+            neptune: { name: '해왕성', src: 'https://upload.wikimedia.org/wikipedia/commons/5/56/Neptune_Full.jpg', color: '#818cf8', holoColor: '#a5b4fc' }
+        };
+        let currentPlanetKey = 'jupiter';
+        let currentPlanet = planets[currentPlanetKey];
+
+        // 2D 이미지 로더
+        const planetImg = new Image();
+        let imgLoaded = false;
+        planetImg.onload = () => { imgLoaded = true; };
+        planetImg.src = currentPlanet.src;
+
+        // 배경 효과 (별, 유성) 데이터
+        const numStars = 150;
+        const stars = [];
+        const starColors = ['#ffffff', '#e0e7ff', '#fef08a', '#fbcfe8', '#c7d2fe'];
+        for(let i = 0; i < numStars; i++) {
+            stars.push({
+                x: Math.random() * 800, y: Math.random() * 500,
+                r: Math.random() * 1.5 + 0.5,
+                color: starColors[Math.floor(Math.random() * starColors.length)],
+                angle: Math.random() * Math.PI * 2,
+                speed: Math.random() * 0.03 + 0.01
+            });
+        }
+        const meteors = [];
+        let time = 0;
+
+        // === 3D WebGL (Three.js) 전역 변수 ===
+        let threeScene, threeCamera, renderer, sceneGroup;
+        let tPlanet, tVirtualPlanet, refPivot, tRaysYellow, tRaysWhite, tEyeGroup;
+        const tTextureLoader = new THREE.TextureLoader();
+
+        // === 이벤트 리스너 ===
+        document.getElementById('btn2D').addEventListener('click', () => {
+            is3DMode = false;
+            document.getElementById('btn2D').classList.replace('text-gray-400', 'text-white');
+            document.getElementById('btn2D').classList.replace('hover:bg-gray-800', 'bg-purple-600');
+            document.getElementById('btn3D').classList.replace('text-white', 'text-gray-400');
+            document.getElementById('btn3D').classList.replace('bg-purple-600', 'hover:bg-gray-800');
+            document.getElementById('threeContainer').classList.add('hidden');
+        });
+
+        document.getElementById('btn3D').addEventListener('click', () => {
+            is3DMode = true;
+            if(!threeScene) initThreeJS();
+            document.getElementById('btn3D').classList.replace('text-gray-400', 'text-white');
+            document.getElementById('btn3D').classList.replace('hover:bg-gray-800', 'bg-purple-600');
+            document.getElementById('btn2D').classList.replace('text-white', 'text-gray-400');
+            document.getElementById('btn2D').classList.replace('bg-purple-600', 'hover:bg-gray-800');
+            document.getElementById('threeContainer').classList.remove('hidden');
+        });
+
+        document.getElementById('planetSelect').addEventListener('change', (e) => {
+            currentPlanetKey = e.target.value;
+            currentPlanet = planets[currentPlanetKey];
+            imgLoaded = false;
+            planetImg.src = currentPlanet.src;
+            if(threeScene) loadThreeTexture(currentPlanet.src);
+        });
+        document.getElementById('objSlider').addEventListener('input', (e) => { objX = parseInt(e.target.value); });
+        document.getElementById('angleSlider').addEventListener('input', (e) => {
+            angle = parseInt(e.target.value);
+            document.getElementById('angleVal').innerText = angle;
+        });
+        document.getElementById('eyeSlider').addEventListener('input', (e) => { eyeY = parseInt(e.target.value); });
+        document.getElementById('rayToggle').addEventListener('change', (e) => { showRays = e.target.checked; });
+
+
+        // === 공통 수학 함수 ===
+        function getReflection(px, py, angleDeg) {
+            let rad = angleDeg * Math.PI / 180;
+            let x2 = px * Math.cos(2 * rad) + py * Math.sin(2 * rad);
+            let y2 = px * Math.sin(2 * rad) - py * Math.cos(2 * rad);
+            return {x: x2, y: y2};
+        }
+
+        function lineIntersection(p1, p2, p3, p4) {
+            let den = (p1.x - p2.x) * (p3.y - p4.y) - (p1.y - p2.y) * (p3.x - p4.x);
+            if (den === 0) return null;
+            let t = ((p1.x - p3.x) * (p3.y - p4.y) - (p1.y - p3.y) * (p3.x - p4.x)) / den;
+            return { x: p1.x + t * (p2.x - p1.x), y: p1.y + t * (p2.y - p1.y) };
+        }
+
+        function angleBetween(vx1, vy1, vx2, vy2) {
+            let dot = vx1*vx2 + vy1*vy2;
+            let mag1 = Math.sqrt(vx1*vx1 + vy1*vy1);
+            let mag2 = Math.sqrt(vx2*vx2 + vy2*vy2);
+            return Math.acos(dot / (mag1 * mag2)) * 180 / Math.PI;
+        }
+
+        function toCanvas(x, y) {
+            return { x: 400 + x, y: 250 - y }; // canvas size 800x500
+        }
+
+        // === 2D 렌더링 함수들 ===
+        function drawBackground() {
+            ctx.fillStyle = '#070714';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            let n1x = 200 + Math.sin(time * 0.01) * 50;
+            let n1y = 100 + Math.cos(time * 0.008) * 30;
+            let n1r = 400 + Math.sin(time * 0.02) * 50;
+            let nebula1 = ctx.createRadialGradient(n1x, n1y, 50, n1x, n1y, n1r);
+            nebula1.addColorStop(0, 'rgba(109, 40, 217, 0.4)');
+            nebula1.addColorStop(1, 'rgba(76, 29, 149, 0)');
+            ctx.fillStyle = nebula1;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            let n2x = 600 + Math.cos(time * 0.012) * 60;
+            let n2y = 400 + Math.sin(time * 0.009) * 40;
+            let n2r = 500 + Math.cos(time * 0.015) * 60;
+            let nebula2 = ctx.createRadialGradient(n2x, n2y, 50, n2x, n2y, n2r);
+            nebula2.addColorStop(0, 'rgba(16, 185, 129, 0.15)');
+            nebula2.addColorStop(0.5, 'rgba(30, 58, 138, 0.2)');
+            nebula2.addColorStop(1, 'rgba(30, 58, 138, 0)');
+            ctx.fillStyle = nebula2;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            stars.forEach(star => {
+                star.angle += star.speed;
+                let currentAlpha = 0.1 + Math.abs(Math.sin(star.angle)) * 0.9;
+                star.x -= star.speed * 5;
+                if (star.x < 0) star.x = canvas.width;
+
+                ctx.fillStyle = star.color;
+                ctx.globalAlpha = currentAlpha;
+                ctx.shadowBlur = star.r * 5;
+                ctx.shadowColor = star.color;
+                ctx.beginPath(); ctx.arc(star.x, star.y, star.r, 0, Math.PI * 2); ctx.fill();
+            });
+
+            if (Math.random() < 0.03) {
+                meteors.push({ x: Math.random() * canvas.width * 1.5, y: -50, vx: -Math.random() * 8 - 4, vy: Math.random() * 8 + 4, life: 1.0, decay: Math.random() * 0.02 + 0.01 });
+            }
+
+            meteors.forEach((m, index) => {
+                m.x += m.vx; m.y += m.vy; m.life -= m.decay;
+                if (m.life <= 0) { meteors.splice(index, 1); } 
+                else {
+                    ctx.globalAlpha = m.life; ctx.shadowBlur = 10; ctx.shadowColor = '#67e8f9';
+                    let tailX = m.x - m.vx * 10, tailY = m.y - m.vy * 10;
+                    let grad = ctx.createLinearGradient(m.x, m.y, tailX, tailY);
+                    grad.addColorStop(0, `rgba(255, 255, 255, ${m.life})`); grad.addColorStop(1, 'rgba(103, 232, 249, 0)');
+                    ctx.strokeStyle = grad; ctx.lineWidth = 2;
+                    ctx.beginPath(); ctx.moveTo(m.x, m.y); ctx.lineTo(tailX, tailY); ctx.stroke();
+                }
+            });
+            
+            ctx.globalAlpha = 1.0; ctx.shadowBlur = 0;
+        }
+
+        function drawLine(p1, p2, color, width, dash = []) {
+            ctx.strokeStyle = color; ctx.lineWidth = width; ctx.setLineDash(dash);
+            ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke(); ctx.setLineDash([]);
+        }
+        function drawText(text, x, y, color, font='14px Noto Sans KR', align='center') {
+            ctx.fillStyle = color; ctx.font = font; ctx.textAlign = align; ctx.fillText(text, x, y);
+        }
+        function drawEye(x, y) {
+            ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.ellipse(x, y, 20, 10, 0, 0, Math.PI*2); ctx.stroke();
+            ctx.fillStyle = '#60a5fa'; ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI*2); ctx.fill();
+        }
+
+        function draw2DScene() {
+            let phone1 = toCanvas(-240, -150); let phone2 = toCanvas(0, -150);
+            drawLine(phone1, phone2, '#3b82f6', 8);
+            drawText("스마트폰 디스플레이", phone1.x + 60, phone1.y + 25, '#60a5fa');
+
+            let v_phone1 = getReflection(-240, -150, angle); let v_phone2 = getReflection(0, -150, angle);
+            let vp1 = toCanvas(v_phone1.x, v_phone1.y); let vp2 = toCanvas(v_phone2.x, v_phone2.y);
+            drawLine(vp1, vp2, 'rgba(30, 58, 138, 0.6)', 4, [6, 6]);
+
+            let rad = angle * Math.PI / 180;
+            let gx1 = -300 * Math.cos(rad), gy1 = -300 * Math.sin(rad);
+            let gx2 = 300 * Math.cos(rad), gy2 = 300 * Math.sin(rad);
+            let gc1 = toCanvas(gx1, gy1); let gc2 = toCanvas(gx2, gy2);
+            drawLine(gc1, gc2, 'rgba(6, 182, 212, 0.3)', 16);
+            drawLine(gc1, gc2, 'rgba(6, 182, 212, 0.8)', 2);
+            drawText(`유리판 (${angle}°)`, gc2.x - 70, gc2.y - 20, '#22d3ee', 'bold 16px Noto Sans KR');
+
+            let E = {x: 280, y: eyeY}; let cE = toCanvas(E.x, E.y);
+            drawEye(cE.x, cE.y); drawText("관찰자", cE.x, cE.y - 25, '#fff', 'bold 14px Noto Sans KR');
+
+            let O = {x: objX, y: -150}; let cO = toCanvas(O.x, O.y);
+            
+            // Draw Real Planet
+            ctx.save(); ctx.globalAlpha = 1; ctx.beginPath(); ctx.arc(cO.x, cO.y, 20, 0, Math.PI * 2); ctx.clip();
+            if (imgLoaded) ctx.drawImage(planetImg, cO.x - 20, cO.y - 20, 40, 40);
+            else { ctx.fillStyle = currentPlanet.color; ctx.fill(); }
+            ctx.restore();
+            drawText(`실제 ${currentPlanet.name} 화면`, cO.x - 10, cO.y + 40, currentPlanet.color);
+
+            // Draw Virtual Planet
+            let V = getReflection(O.x, O.y, angle); let cV = toCanvas(V.x, V.y);
+            ctx.save(); ctx.globalAlpha = 0.4; ctx.beginPath(); ctx.arc(cV.x, cV.y, 20, 0, Math.PI * 2); ctx.clip();
+            if (imgLoaded) ctx.drawImage(planetImg, cV.x - 20, cV.y - 20, 40, 40);
+            else { ctx.fillStyle = currentPlanet.color; ctx.fill(); }
+            ctx.restore();
+            drawText(`${currentPlanet.name} 홀로그램`, cV.x - 40, cV.y - 30, currentPlanet.holoColor);
+
+            if (showRays) {
+                let p3 = {x: 0, y: 0}, p4 = {x: Math.cos(rad)*100, y: Math.sin(rad)*100};
+                let I = lineIntersection(V, E, p3, p4);
+                if (I) {
+                    let cI = toCanvas(I.x, I.y);
+                    let distToCenter = Math.sqrt(I.x*I.x + I.y*I.y);
+                    if(distToCenter <= 300 && I.x < E.x) {
+                        drawLine(cO, cI, '#facc15', 3); drawLine(cI, cE, '#facc15', 3); 
+                        drawLine(cI, cV, 'rgba(255,255,255,0.7)', 2, [5, 5]); 
+
+                        let nx = -Math.sin(rad), ny = Math.cos(rad);
+                        let vE_I = {x: E.x - I.x, y: E.y - I.y};
+                        if (nx * vE_I.x + ny * vE_I.y < 0) { nx = -nx; ny = -ny; }
+                        let cN = toCanvas(I.x + nx*60, I.y + ny*60);
+                        drawLine(cI, cN, '#22c55e', 2); drawText("법선", cN.x, cN.y - 10, '#4ade80');
+
+                        let inAngle = Math.abs(angleBetween(O.x-I.x, O.y-I.y, nx, ny));
+                        let refAngle = Math.abs(angleBetween(E.x-I.x, E.y-I.y, nx, ny));
+
+                        ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(20, 20, 180, 80);
+                        ctx.strokeStyle = '#374151'; ctx.strokeRect(20, 20, 180, 80);
+                        drawText(`입사각: ${inAngle.toFixed(1)}°`, 35, 45, '#facc15', 'bold 16px Noto Sans KR', 'left');
+                        drawText(`반사각: ${refAngle.toFixed(1)}°`, 35, 75, '#facc15', 'bold 16px Noto Sans KR', 'left');
+                    } else {
+                        drawText(`⚠️ 빛이 반사판을 벗어나 눈에 닿지 않습니다.`, 30, 40, '#ef4444', 'bold 16px Noto Sans KR', 'left');
+                    }
+                }
+            }
+        }
+
+        // === 3D WebGL 셋업 및 렌더링 (Three.js) ===
+        function initThreeJS() {
+            const container = document.getElementById('threeContainer');
+            const simCanvas = document.getElementById('simCanvas');
+            
+            // 3D 화면이 켜질 때 브라우저가 크기를 0으로 인식하는 것을 방지 (2D 캔버스 크기로 보정)
+            let cw = container.clientWidth || simCanvas.clientWidth || 800;
+            let ch = container.clientHeight || simCanvas.clientHeight || 500;
+
+            threeScene = new THREE.Scene();
+            // 카메라 살짝 측면 위에서 내려다보게 설정
+            threeCamera = new THREE.PerspectiveCamera(40, cw / ch, 0.1, 1000);
+            threeCamera.position.set(0, 15, 85);
+            threeCamera.lookAt(0, -10, 0); // 카메라가 홀로그램 장치 중앙을 정확히 바라보도록 수정 (매우 중요)
+
+            // 투명 배경을 통해 2D 캔버스의 우주 배경이 보이도록 함
+            renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+            renderer.setSize(cw, ch);
+            renderer.domElement.style.width = '100%';
+            renderer.domElement.style.height = '100%';
+            container.appendChild(renderer.domElement);
+
+            sceneGroup = new THREE.Group();
+            // 약간 기울여서 입체감 부여
+            sceneGroup.rotation.x = 0.1; 
+            sceneGroup.rotation.y = -0.3;
+            threeScene.add(sceneGroup);
+
+            const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+            sceneGroup.add(ambient);
+            const directional = new THREE.DirectionalLight(0xffffff, 0.8);
+            directional.position.set(10, 30, 20);
+            sceneGroup.add(directional);
+
+            // 스마트폰 화면 (바닥 면)
+            const phoneGeo = new THREE.PlaneGeometry(35, 20);
+            const phoneMat = new THREE.MeshPhongMaterial({ color: 0x1e3a8a, side: THREE.DoubleSide, emissive: 0x051030 });
+            const tPhone = new THREE.Mesh(phoneGeo, phoneMat);
+            tPhone.rotation.x = -Math.PI / 2;
+            tPhone.position.set(-10, -15, 0); // 2D y=-150 -> 3D y=-15
+            sceneGroup.add(tPhone);
+
+            // 반사판 (유리판)
+            refPivot = new THREE.Group();
+            const refGeo = new THREE.PlaneGeometry(45, 35);
+            const refMat = new THREE.MeshPhysicalMaterial({
+                color: 0x22d3ee, transparent: true, opacity: 0.3, side: THREE.DoubleSide, 
+                roughness: 0.1, transmission: 0.9, thickness: 0.5
+            });
+            const refPlane = new THREE.Mesh(refGeo, refMat);
+            refPlane.rotation.x = -Math.PI / 2; // 초기 평면화
+            refPivot.add(refPlane);
+            sceneGroup.add(refPivot);
+
+            // 행성 (실제)
+            const planetGeo = new THREE.SphereGeometry(2.5, 32, 32);
+            tPlanet = new THREE.Mesh(planetGeo, new THREE.MeshPhongMaterial({color: 0xffffff}));
+            sceneGroup.add(tPlanet);
+
+            // 행성 (허상)
+            tVirtualPlanet = new THREE.Mesh(planetGeo, new THREE.MeshPhongMaterial({color: 0xffffff, transparent: true, opacity: 0.5}));
+            sceneGroup.add(tVirtualPlanet);
+
+            // 눈 (관찰자)
+            tEyeGroup = new THREE.Group();
+            const eyeGeo = new THREE.SphereGeometry(2, 16, 16);
+            const eyeMat = new THREE.MeshBasicMaterial({color: 0xffffff});
+            const eyeMesh = new THREE.Mesh(eyeGeo, eyeMat);
+            const pupil = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 16), new THREE.MeshBasicMaterial({color: 0x3b82f6}));
+            pupil.position.z = 1.4;
+            tEyeGroup.add(eyeMesh);
+            tEyeGroup.add(pupil);
+            sceneGroup.add(tEyeGroup);
+
+            // 빛의 경로 선언
+            const lineMatYellow = new THREE.LineBasicMaterial({ color: 0xfacc15, linewidth: 2 });
+            tRaysYellow = new THREE.Line(new THREE.BufferGeometry(), lineMatYellow);
+            sceneGroup.add(tRaysYellow);
+
+            const lineMatWhite = new THREE.LineDashedMaterial({ color: 0xffffff, dashSize: 0.5, gapSize: 0.5 });
+            tRaysWhite = new THREE.Line(new THREE.BufferGeometry(), lineMatWhite);
+            sceneGroup.add(tRaysWhite);
+
+            // 마우스 & 터치 드래그 상호작용 (회전)
+            let isDragging = false, prevX = 0, prevY = 0;
+            
+            // 마우스 이벤트
+            container.addEventListener('mousedown', (e) => { 
+                isDragging = true; 
+                prevX = e.clientX; 
+                prevY = e.clientY; 
+            });
+            window.addEventListener('mouseup', () => { isDragging = false; });
+            container.addEventListener('mousemove', (e) => {
+                if(isDragging) {
+                    let deltaX = e.clientX - prevX;
+                    let deltaY = e.clientY - prevY;
+                    sceneGroup.rotation.y += deltaX * 0.01;
+                    sceneGroup.rotation.x += deltaY * 0.01;
+                    prevX = e.clientX; 
+                    prevY = e.clientY;
+                }
+            });
+
+            // 터치 이벤트 (모바일 지원)
+            container.addEventListener('touchstart', (e) => { 
+                if (e.touches.length > 0) {
+                    isDragging = true; 
+                    prevX = e.touches[0].clientX; 
+                    prevY = e.touches[0].clientY; 
+                }
+            }, {passive: true});
+            window.addEventListener('touchend', () => { isDragging = false; });
+            container.addEventListener('touchmove', (e) => {
+                if(isDragging && e.touches.length > 0) {
+                    let deltaX = e.touches[0].clientX - prevX;
+                    let deltaY = e.touches[0].clientY - prevY;
+                    sceneGroup.rotation.y += deltaX * 0.01;
+                    sceneGroup.rotation.x += deltaY * 0.01;
+                    prevX = e.touches[0].clientX; 
+                    prevY = e.touches[0].clientY;
+                }
+            }, {passive: true});
+
+            loadThreeTexture(currentPlanet.src);
+            
+            // 창 크기 조절 대응
+            window.addEventListener('resize', () => {
+                if (threeCamera && renderer && is3DMode) {
+                    let newCw = container.clientWidth || simCanvas.clientWidth || 800;
+                    let newCh = container.clientHeight || simCanvas.clientHeight || 500;
+                    threeCamera.aspect = newCw / newCh;
+                    threeCamera.updateProjectionMatrix();
+                    renderer.setSize(newCw, newCh);
+                }
+            });
+        }
+
+        function loadThreeTexture(src) {
+            tTextureLoader.load(src, (tex) => {
+                if (tPlanet && tVirtualPlanet) {
+                    tPlanet.material.map = tex; 
+                    tPlanet.material.needsUpdate = true;
+                    tVirtualPlanet.material.map = tex; 
+                    tVirtualPlanet.material.needsUpdate = true;
+                }
+            });
+        }
+
+        function updateThreeJS() {
+            // S = 0.1 (2D 좌표를 3D 공간으로 축소)
+            const S = 0.1;
+            const rad = angle * Math.PI / 180;
+            
+            // 반사판 각도 조절
+            refPivot.rotation.z = rad;
+
+            // 실제 행성 위치
+            tPlanet.position.set(objX * S, -15, 0);
+
+            // 관찰자 위치
+            let E = {x: 28, y: eyeY * S, z: 0};
+            tEyeGroup.position.set(E.x, E.y, E.z);
+            tEyeGroup.lookAt(0, -15, 0); // 기본적으로 중앙 주시
+
+            // 허상 행성 위치 (2D 반사 계산 활용)
+            let V = getReflection(objX, -150, angle);
+            tVirtualPlanet.position.set(V.x * S, V.y * S, 0);
+
+            // 빛의 경로 업데이트
+            if (showRays) {
+                let p3 = {x: 0, y: 0}, p4 = {x: Math.cos(rad)*100, y: Math.sin(rad)*100};
+                let I = lineIntersection(V, {x: E.x/S, y: E.y/S}, p3, p4);
+                
+                if (I && Math.sqrt(I.x*I.x + I.y*I.y) <= 300 && I.x < E.x/S) {
+                    const ptsYellow = [
+                        new THREE.Vector3(objX*S, -15, 0),
+                        new THREE.Vector3(I.x*S, I.y*S, 0),
+                        new THREE.Vector3(E.x, E.y, E.z)
+                    ];
+                    tRaysYellow.geometry.setFromPoints(ptsYellow);
+                    tRaysYellow.visible = true;
+
+                    const ptsWhite = [
+                        new THREE.Vector3(I.x*S, I.y*S, 0),
+                        new THREE.Vector3(V.x*S, V.y*S, 0)
+                    ];
+                    tRaysWhite.geometry.setFromPoints(ptsWhite);
+                    tRaysWhite.computeLineDistances(); // 점선을 위해 필수
+                    tRaysWhite.visible = true;
+                } else {
+                    tRaysYellow.visible = false; tRaysWhite.visible = false;
+                }
+            } else {
+                tRaysYellow.visible = false; tRaysWhite.visible = false;
+            }
+        }
+
+        // === 통합 애니메이션 루프 ===
+        function animate() {
+            time += 1;
+            
+            // 투명 배경을 포함한 우주 렌더링은 항상 실행 (3D의 멋진 배경이 됨)
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawBackground();
+
+            if (!is3DMode) {
+                // 2D 뷰 활성화
+                draw2DScene();
+            } else {
+                // 3D 뷰 활성화
+                if(threeScene) {
+                    updateThreeJS();
+                    renderer.render(threeScene, threeCamera);
+                }
+            }
+            requestAnimationFrame(animate);
+        }
+        
+        animate();
+    </script>
+</body>
+</html>
